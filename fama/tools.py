@@ -24,6 +24,15 @@ from pathlib import Path
 from .core import new_id, now_utc
 
 
+
+# some environments (corporate/sandbox egress proxies) MITM TLS with a CA
+# that certifi does not know; the system store does. Prefer the system store.
+import ssl as _ssl
+try:
+    _SSL_CTX = _ssl.create_default_context()
+except Exception:  # pragma: no cover
+    _SSL_CTX = True
+
 class ToolError(Exception):
     pass
 
@@ -149,6 +158,10 @@ TOOL_CATALOG: dict[str, dict] = {
     "mutation":      {"desc": "generate mutants and measure test kill rate", "risk": "medium"},
     "web_fetch":     {"desc": "fetch a public URL (research)", "risk": "medium"},
     "web_search":    {"desc": "search the web (research)", "risk": "medium"},
+    "web_reader":    {"desc": "read any page as clean text (Jina Reader; Agent Reach channel)", "risk": "medium"},
+    "gh_api":        {"desc": "GitHub API: repos, issues, code search (Agent Reach channel)", "risk": "low"},
+    "rss_read":      {"desc": "read an RSS/Atom feed (Agent Reach channel)", "risk": "medium"},
+    "youtube_transcript": {"desc": "fetch video info/subtitles via yt-dlp (Agent Reach channel)", "risk": "medium"},
 }
 
 
@@ -248,7 +261,7 @@ class ToolRouter:
             return ToolResult(False, "web_fetch", "", "network egress not permitted by governance")
         try:
             import httpx
-            r = httpx.get(url, timeout=20.0, follow_redirects=True,
+            r = httpx.get(url, timeout=20.0, verify=_SSL_CTX, follow_redirects=True,
                           headers={"User-Agent": "FAMA2.0-research/2.0"})
             ok = r.status_code < 400
             return ToolResult(ok, "web_fetch", r.text[:120_000] if ok else "",
@@ -285,3 +298,113 @@ class ToolRouter:
                               "no search engine configured (set TAVILY_API_KEY or BRAVE_API_KEY)")
         except Exception as e:
             return ToolResult(False, "web_search", "", str(e))
+
+    # ------------------------------------------------- Agent Reach channels
+
+    def _net(self):
+        if not self.governance.state.allow_network:
+            return ToolResult(False, "net", "",
+                              "network egress not permitted by governance")
+        return None
+
+    def _web_reader(self, url: str) -> ToolResult:
+        blocked = self._net()
+        if blocked:
+            return ToolResult(False, "web_reader", "", blocked.stderr)
+        try:
+            import httpx
+            # direct fetch first; fall back to Jina Reader for JS-heavy pages
+            for target in (url, f"https://r.jina.ai/{url}"):
+                try:
+                    r = httpx.get(target, timeout=25.0, follow_redirects=True, verify=_SSL_CTX,
+                                  headers={"User-Agent": "FAMA2.0-research/2.0"})
+                    if r.status_code < 400 and r.text.strip():
+                        return ToolResult(True, "web_reader", r.text[:120_000],
+                                          meta={"via": "direct" if target == url else "jina"})
+                except Exception:
+                    continue
+            return ToolResult(False, "web_reader", "", f"could not read {url}")
+        except Exception as e:
+            return ToolResult(False, "web_reader", "", str(e))
+
+    def _gh_api(self, path: str) -> ToolResult:
+        blocked = self._net()
+        if blocked:
+            return ToolResult(False, "gh_api", "", blocked.stderr)
+        try:
+            import httpx, json as _json
+            if not path.startswith("/"):
+                path = "/" + path
+            r = httpx.get(f"https://api.github.com{path}", timeout=20.0, verify=_SSL_CTX,
+                          headers={"Accept": "application/vnd.github+json",
+                                   "User-Agent": "FAMA2.0-research/2.0"})
+            ok = r.status_code < 400
+            return ToolResult(ok, "gh_api", r.text[:150_000] if ok else "",
+                              "" if ok else f"HTTP {r.status_code}",
+                              r.status_code, meta={"path": path})
+        except Exception as e:
+            return ToolResult(False, "gh_api", "", str(e))
+
+    def _rss_read(self, url: str, limit: int = 15) -> ToolResult:
+        blocked = self._net()
+        if blocked:
+            return ToolResult(False, "rss_read", "", blocked.stderr)
+        try:
+            import httpx
+            import xml.etree.ElementTree as ET
+            r = httpx.get(url, timeout=20.0, verify=_SSL_CTX, follow_redirects=True,
+                          headers={"User-Agent": "FAMA2.0-research/2.0"})
+            r.raise_for_status()
+            items = parse_feed(r.text, limit)
+            text = "\n\n".join(f"{i['title']}\n{i['link']}" for i in items)
+            return ToolResult(True, "rss_read", text or "(empty feed)",
+                              meta={"items": len(items)})
+        except Exception as e:
+            return ToolResult(False, "rss_read", "", str(e))
+
+    def _youtube_transcript(self, url: str) -> ToolResult:
+        blocked = self._net()
+        if blocked:
+            return ToolResult(False, "youtube_transcript", "", blocked.stderr)
+        import shutil
+        ytdlp = shutil.which("yt-dlp") or str(Path.home() / ".agent-reach-venv/bin/yt-dlp")
+        if not Path(ytdlp).exists():
+            return ToolResult(False, "youtube_transcript", "",
+                              "yt-dlp not installed (Agent Reach provides it)")
+        res = self.sandbox.run([ytdlp, "--skip-download", "--write-auto-sub",
+                                "--sub-langs", "en.*,pl", "--sub-format", "vtt/srt",
+                                "-o", "__fama_yt__", url], cwd=self.workspace)
+        subs = sorted(self.workspace.glob("__fama_yt__*.vtt")) + \
+            sorted(self.workspace.glob("__fama_yt__*.srt"))
+        text = ""
+        if subs:
+            raw = subs[0].read_text(errors="replace")
+            lines = [l.strip() for l in raw.splitlines()
+                     if l.strip() and not l.strip().isdigit()
+                     and "-->" not in l and not l.startswith(("WEBVTT", "Kind:", "Language:"))]
+            text = "\n".join(dict.fromkeys(lines))[:100_000]
+        return ToolResult(res.ok or bool(text), "youtube_transcript", text,
+                          "" if text else res.head(300),
+                          meta={"video_info": res.ok and res.stdout or ""})
+
+
+def parse_feed(xml_text: str, limit: int = 15) -> list[dict]:
+    """Parse RSS 2.0 / Atom into items (title, link) — stdlib only."""
+    import xml.etree.ElementTree as ET
+    root = ET.fromstring(xml_text.encode() if isinstance(xml_text, str) else xml_text)
+    out = []
+    for item in root.iter():
+        tag = item.tag.split("}")[-1]
+        if tag in ("item", "entry"):
+            title = link = ""
+            for ch in item:
+                ctag = ch.tag.split("}")[-1]
+                if ctag == "title" and ch.text:
+                    title = ch.text.strip()
+                if ctag == "link" and not link:
+                    link = (ch.get("href") or ch.text or "").strip()
+            if title or link:
+                out.append({"title": title, "link": link})
+            if len(out) >= limit:
+                break
+    return out

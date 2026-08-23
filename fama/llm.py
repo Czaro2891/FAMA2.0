@@ -28,6 +28,13 @@ import httpx
 
 from .core import ModelClass, ProviderKind, clamp, new_id
 
+
+import ssl as _ssl
+try:
+    _SSL_CTX = _ssl.create_default_context()   # system CA store (MITM-proxy friendly)
+except Exception:  # pragma: no cover
+    _SSL_CTX = True
+
 PRICE_NOTE = "prices are approximate planning estimates, not billing"
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
@@ -333,7 +340,7 @@ class LLMGateway:
             return list(self._local_cache[1])
         models: list[ModelInfo] = []
         try:
-            r = httpx.get(f"{base}/models", timeout=3.0,
+            r = httpx.get(f"{base}/models", timeout=3.0, verify=_SSL_CTX,
                           headers={"User-Agent": "FAMA2.0/2.0"})
             if r.status_code == 200:
                 for item in (r.json().get("data") or [])[:40]:
@@ -448,7 +455,7 @@ class LLMGateway:
 
     def _client_(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient(timeout=self.http_timeout)
+            self._client = httpx.AsyncClient(timeout=self.http_timeout, verify=_SSL_CTX)
         return self._client
 
     async def close(self):

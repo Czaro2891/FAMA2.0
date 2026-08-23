@@ -240,3 +240,24 @@ python -m pytest            # 59 testów: core, llm, tools/sandbox, governance,
 | 40-41 diversity + zasoby | selection/twin/budget | ✔ (budżet koszt/czas/tokeny/concurrency) |
 | 42-43 adaptacyjna autonomia + niepewność | orchestrator | ✔ (stany wyniku) |
 | 45-49 różnorodność zachowań | `scenarios.py` + testy | ✔ (6 scenariuszy, 4+ wzorce) |
+
+## Integracja z Agent Reach
+
+[Agent Reach](https://github.com/Panniantong/agent-reach) to selektor/installer
+narzędzi dostępowych dla agentów (web, YouTube, GitHub, RSS, Exa, Twitter, Reddit, B站…).
+FAMA **routinguje** te kanały jako swoje narzędzia (FAMA nie jest wrapperem — wywołuje
+upstream bezpośrednio):
+
+| Narzędzie FAMA | Kanał Agent Reach | Uwagi |
+|---|---|---|
+| `gh_api` | GitHub (gh / api.github.com) | repo, issues, code search |
+| `web_reader` | dowolna strona | najpierw bezpośrednio, potem Jina Reader (`r.jina.ai`) |
+| `rss_read` | RSS/Atom | parse stdlib (RSS 2.0 + Atom) |
+| `youtube_transcript` | YouTube (yt-dlp) | napisy/auto-subs, odczyt sandboxowany |
+
+Wszystkie podlegają governance (`allow_network` tylko dla zadań research) i deny-by-default.
+Instalacja po stronie hosta: `pipx install https://github.com/Panniantong/agent-reach/archive/main.zip`
++ `agent-reach install --env=auto` (safe check); tryb `--system` tylko za wyraźną zgodą.
+Sieciowa uczciwość: FAMA weryfikuje kanały **rzeczywistymi wywołaniami** — w sandboxie
+Areny policyka egress przepuszcza tylko GitHub (reszta kanałów Agent Reach działa na
+pełnej instalacji lokalnej).
