@@ -23,11 +23,31 @@ Wymagany Python 3.11+.
 FAMA używa **prawdziwych modeli przez API** — brak klucza = uczciwy status
 `BLOCKED`, nigdy udawana inteligencja:
 
+### Lokalny LLM (Ollama / LM Studio / llama.cpp / vLLM) — bez klucza, bez kosztów
+
+```bash
+# Ollama (domyślnie port 11434):
+echo 'OPENAI_BASE_URL=http://localhost:11434/v1' > .env
+python -m fama doctor     # → local: OK + lista odkrytych modeli
+python -m fama serve      # zadania lecą przez Twój lokalny model, koszt ~= $0
+```
+
+LM Studio → `http://localhost:1234/v1`, llama.cpp (`llama-server`) → `http://localhost:8080/v1`,
+vLLM → `http://localhost:8001/v1`. **Modele odkrywane są automatycznie** (endpoint `/v1/models`)
+i klasyfikowane heurystycznie (np. `qwen2.5-coder:7b` → klasa *coding+cheap*, `deepseek-r1:32b`
+→ *reasoning*); klucz API nie jest wymagany, koszt szacowany jako ~0.
+Jeśli endpoint nie udostępnia listy modeli: ustaw `FAMA_COMPAT_DEFAULT_MODEL=nazwa-modelu`.
+
+Test integracji bez modelu: `python examples/local_llm_demo.py` (jawnie oznaczony
+serwer demo — **nie** jest modelem AI) + przykład w nagłówku pliku.
+
+### API chmurowe
+
 ```bash
 export OPENAI_API_KEY=sk-...            # provider OpenAI
 export ANTHROPIC_API_KEY=sk-ant-...     # provider Anthropic
 export OPENROUTER_API_KEY=sk-or-v1-...  # OpenRouter (6 modeli: gpt-4o-mini/haiku/sonnet/o4-mini/opus...)
-# opcjonalnie dowolny endpoint kompatybilny z OpenAI (vLLM, Ollama, LM Studio...):
+# opcjonalnie dowolny inny endpoint kompatybilny z OpenAI:
 export OPENAI_BASE_URL=http://localhost:11434/v1
 export FAMA_COMPAT_DEFAULT_MODEL=qwen2.5-coder:14b
 # rejestracja własnych modeli (provider:id:klasy:cena_in:cena_out za Mtok):
@@ -38,7 +58,7 @@ export TAVILY_API_KEY=...   # lub BRAVE_API_KEY
 ```
 
 Klucze można też zapisać w pliku `.env` w katalogu projektu (format
-`KEY=VALUE`; plik jest w `.gitignore` i ładowany automatycznie).
+`KEY=VALUE`; plik jest w `.gitignore` i ładowany automatycznie — wzór: `.env.example`).
 
 `python -m fama doctor` sprawdza konfigurację **oraz osiągalność endpointu**
 (niektóre sieci — np. sandboxy — blokują ruch do API LLM; doctor to raportuje).

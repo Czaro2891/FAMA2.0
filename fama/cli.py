@@ -75,6 +75,20 @@ def cmd_doctor():
     if prov.get("openrouter"):
         ok = _probe("https://openrouter.ai/api/v1/models")
         print(f"  openrouter endpoint: {'reachable' if ok else 'UNREACHABLE from this network'}")
+    if prov.get("local"):
+        base = os.environ.get("OPENAI_BASE_URL", "")
+        ok = _probe(f"{base.rstrip('/')}/models")
+        print(f"  local endpoint {base}: {'reachable' if ok else 'UNREACHABLE'}")
+        if ok:
+            from .llm import LLMGateway as _G
+            found = _G().discover_local_models()
+            print(f"    discovered models ({len(found)}):")
+            for m in found[:10]:
+                print(f"      {'*' if m.available else ' '} {m.model_id:34s} "
+                      f"{'+'.join(c.value for c in m.classes):22s} "
+                      f"quality {m.quality:.2f} · ~{m.latency_s:.0f}s")
+            if not found:
+                print("      (none — set FAMA_COMPAT_DEFAULT_MODEL or FAMA_MODELS)")
     print("  models:")
     for m in g.catalog():
         print(f"    {'*' if m.available else ' '} {m.id:38s} "

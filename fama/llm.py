@@ -32,6 +32,16 @@ PRICE_NOTE = "prices are approximate planning estimates, not billing"
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]", "host.docker.internal")
+
+
+def is_local_url(url: str) -> bool:
+    try:
+        host = url.split("//", 1)[-1].split(":", 1)[0].split("/", 1)[0]
+        return host in LOCAL_HOSTS or host.endswith(".local")
+    except Exception:
+        return False
+
 
 def _load_dotenv(path: str = ".env") -> None:
     """Minimal .env loader (KEY=VALUE lines, '#' comments, no overrides)."""
@@ -109,6 +119,39 @@ OPENROUTER_MODELS = [
 ]
 
 
+def classify_local_model(model_id: str) -> ModelInfo:
+    """Heuristic class/quality/latency mapping for a locally served model."""
+    import re as _re
+    n = model_id.lower()
+    size = 0.0
+    m = _re.search(r"(\d+(?:\.\d+)?)\s*b\b", n)
+    if m:
+        size = float(m.group(1))
+    classes = [ModelClass.LOCAL]
+    if any(k in n for k in ("coder", "code", "devstral", "codestral", "starcoder")):
+        classes += _mc("coding")
+    if any(k in n for k in ("r1", "reason", "think", "qwq", "max")) or size >= 27:
+        classes += _mc("reasoning")
+    if any(k in n for k in ("mini", "small", "nano", "tiny", "flash", "1b", "2b",
+                            "3b", "4b", "7b", "8b")) or 0 < size <= 9:
+        classes += _mc("cheap", "fast")
+    if len(classes) == 1:
+        classes += _mc("fast")
+    if size >= 60:
+        quality, latency = 0.85, 45.0
+    elif size >= 27:
+        quality, latency = 0.78, 30.0
+    elif size >= 13:
+        quality, latency = 0.72, 18.0
+    elif size > 0:
+        quality, latency = 0.65, 10.0
+    else:
+        quality, latency = 0.70, 12.0
+    return ModelInfo(f"local/{model_id}", model_id, ProviderKind.OPENAI_COMPATIBLE,
+                     classes, 0.0, 0.0, latency, quality,
+                     note="local endpoint (auto-discovered, cost ~= 0)")
+
+
 class ModelError(Exception):
     pass
 
@@ -184,19 +227,56 @@ class LLMGateway:
         self.call_log: list[dict] = []
         self._client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
+        self._local_cache: tuple[float, list[ModelInfo]] | None = None  # (ts, models)
 
     # ---------------------------------------------------------- providers
 
     def provider_status(self) -> dict:
+        base = os.environ.get("OPENAI_BASE_URL", "")
+        local = bool(base) and is_local_url(base)
         s = {
-            "openai": bool(os.environ.get("OPENAI_API_KEY")),
+            "openai": bool(os.environ.get("OPENAI_API_KEY") and not local),
             "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
-            "openai_compatible": bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_BASE_URL")),
+            "openai_compatible": bool(base and
+                                      (os.environ.get("OPENAI_API_KEY") or local)),
             "openrouter": bool(os.environ.get("OPENROUTER_API_KEY")),
+            "local": local,
             "scripted": self.allow_scripted,
         }
-        s["any_real"] = s["openai"] or s["anthropic"] or s["openai_compatible"] or s["openrouter"]
+        s["any_real"] = s["openai"] or s["anthropic"] or s["openai_compatible"] \
+            or s["openrouter"]
         return s
+
+    def local_base(self) -> str | None:
+        base = os.environ.get("OPENAI_BASE_URL", "")
+        return base.rstrip("/") if base and is_local_url(base) else None
+
+    def discover_local_models(self, ttl_s: float = 60.0) -> list[ModelInfo]:
+        """Auto-discover models from a local OpenAI-compatible endpoint (/models).
+
+        Works with Ollama (11434), LM Studio (1234), llama.cpp server (8080),
+        vLLM (8001) and anything else speaking the OpenAI API.
+        """
+        import time as _time
+        base = self.local_base()
+        if not base:
+            return []
+        now = _time.time()
+        if self._local_cache and now - self._local_cache[0] < ttl_s:
+            return list(self._local_cache[1])
+        models: list[ModelInfo] = []
+        try:
+            r = httpx.get(f"{base}/models", timeout=3.0,
+                          headers={"User-Agent": "FAMA2.0/2.0"})
+            if r.status_code == 200:
+                for item in (r.json().get("data") or [])[:40]:
+                    mid = str(item.get("id", "")).strip()
+                    if mid:
+                        models.append(classify_local_model(mid))
+        except Exception:
+            return []
+        self._local_cache = (now, models)
+        return list(models)
 
     def _env_models(self) -> list[ModelInfo]:
         out: list[ModelInfo] = []
@@ -252,6 +332,17 @@ class LLMGateway:
                     models.append(ModelInfo(mid_qualified, mid,
                                             ProviderKind.OPENAI_COMPATIBLE, classes,
                                             pin, pout, lat, q, note="via OpenRouter"))
+        if status["local"]:
+            have = {m.id for m in models}
+            for lm in self.discover_local_models():
+                if lm.id not in have:
+                    models.append(lm)
+            base = os.environ.get("FAMA_COMPAT_DEFAULT_MODEL", "").strip()
+            if base and not any(m.model_id == base for m in models):
+                models.append(ModelInfo(f"openai_compatible/{base}", base,
+                                        ProviderKind.OPENAI_COMPATIBLE,
+                                        _mc("fast", "coding"), 0.0, 0.0, 12.0, 0.7,
+                                        note="configured default model of the local endpoint"))
         return models
 
     def available_models(self) -> list[ModelInfo]:
@@ -274,9 +365,11 @@ class LLMGateway:
         if req.model_class:
             pref = [m for m in models if req.model_class in m.classes]
             if pref:
-                pref.sort(key=lambda m: (m.price_in + m.price_out) / (m.quality + 0.01))
+                pref.sort(key=lambda m: (m.price_in + m.price_out,
+                                         m.latency_s / (m.quality + 0.01)))
                 return pref[0]
-        models.sort(key=lambda m: (m.price_in + m.price_out) / (m.quality + 0.01))
+        models.sort(key=lambda m: (m.price_in + m.price_out,
+                                   m.latency_s / (m.quality + 0.01)))
         return models[0]
 
     # ---------------------------------------------------------- api calls
@@ -333,11 +426,14 @@ class LLMGateway:
         client = self._client_()
         if m.provider in (ProviderKind.OPENAI, ProviderKind.OPENAI_COMPATIBLE):
             orkey = os.environ.get("OPENROUTER_API_KEY", "")
-            if m.provider == ProviderKind.OPENAI_COMPATIBLE and orkey:
+            if m.provider == ProviderKind.OPENAI_COMPATIBLE and orkey and \
+                    not m.id.startswith("local/"):
                 base, key = OPENROUTER_BASE, orkey
             else:
-                base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-                key = os.environ.get("OPENAI_API_KEY", "")
+                base = os.environ.get("OPENAI_BASE_URL",
+                                      "https://api.openai.com/v1").rstrip("/")
+                # local endpoints (Ollama/LM Studio/llama.cpp) need no real key
+                key = os.environ.get("OPENAI_API_KEY", "") or "local"
             body: dict = {
                 "model": m.model_id,
                 "messages": [{"role": x.role, "content": x.content} for x in req.messages],
