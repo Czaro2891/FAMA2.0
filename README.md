@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/fama-cover.jpg" alt="FAMA 2.0 — Adaptive Agent Operating System" width="720">
+</p>
+
 # FAMA 2.0 — Adaptive Agent Operating System
 
 FAMA 2.0 to autonomiczny, adaptacyjny system wieloagentowy. Podstawową jednostką
