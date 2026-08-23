@@ -571,16 +571,29 @@ function renderResult() {
   if (!s) return;
   const t = s.task;
   const rs = t.result_status || "(w toku)";
+  const art = t.final_artifact || "";
+  let preview = "";
+  if (art.endsWith(".html") && !state.replay && t.id) {
+    preview = `
+      <h3>Artefakt — podgląd na żywo</h3>
+      <iframe src="/api/tasks/${t.id}/artifact"
+        style="width:100%;height:430px;border:1px solid var(--line);border-radius:10px;
+               background:#0b0f14"></iframe>
+      <p class="small" style="margin-top:6px">
+        <a href="/api/tasks/${t.id}/artifact" target="_blank">otwórz artefakt w nowej karcie ↗</a>
+      </p>`;
+  }
   el.innerHTML = `
     <div class="result-banner ${esc(rs)}">${esc(rs.toUpperCase())}</div>
     <p>${esc(t.result_summary || "")}</p>
+    ${preview}
     <div class="cards" style="margin-top:12px">
       <div class="card"><h4>Koszt</h4>${fmtCost(t.cost_usd)}</div>
       <div class="card"><h4>Czas</h4>${t.duration_s || 0}s</div>
       <div class="card"><h4>Tokeny</h4>in ${((t.tokens || {}).input) || 0} / out ${((t.tokens || {}).output) || 0}</div>
       <div class="card"><h4>Wersje planu</h4>${t.plan_versions || 0} (replany: ${t.replan_count || 0})</div>
       <div class="card"><h4>Błędy</h4>${t.failure_count || 0}</div>
-      <div class="card"><h4>Artefakt</h4><span class="mono">${esc(t.final_artifact || "—")}</span></div>
+      <div class="card"><h4>Artefakt</h4><span class="mono">${esc(art || "—")}</span></div>
     </div>`;
 }
 

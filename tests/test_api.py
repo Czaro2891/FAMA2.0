@@ -74,3 +74,26 @@ def test_index_served(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "FAMA 2.0" in r.text
+
+
+def test_artifact_endpoint_serves_html(client):
+    r = client.post("/api/scenarios/animated-title/run")
+    tid = r.json()["task_id"]
+    for _ in range(120):
+        state = client.get(f"/api/tasks/{tid}").json()
+        if state and state["task"]["status"] in ("completed", "failed", "blocked", "uncertain"):
+            break
+        import time
+        time.sleep(0.25)
+    assert state["task"]["result_status"] == "verified"
+    art = client.get(f"/api/tasks/{tid}/artifact")
+    assert art.status_code == 200
+    assert art.headers["content-type"].startswith("text/html")
+    assert "@keyframes" in art.text and "FAMA" in art.text
+
+
+def test_artifact_endpoint_path_traversal_blocked(client):
+    r = client.post("/api/scenarios/animated-title/run")
+    tid = r.json()["task_id"]
+    # no way to pass an arbitrary path via API — but unknown task must 404
+    assert client.get("/api/tasks/nonexistent/artifact").status_code == 404

@@ -97,6 +97,35 @@ async def test_different_problems_choose_different_strategies(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_animated_title_design_task(tmp_path):
+    f, st = await _run("animated-title", tmp_path)
+    assert st.task.result_status.value == "verified"
+    assert st.chosen_strategy.pattern == "specialist"
+    # deterministic DOMAIN-RULE oracle (no LLM): artifact checks
+    runs = [r for r in st.oracle_runs if r.kind.value == "domain_rule"]
+    assert runs and runs[0].verdict == "pass"
+    art = st.tools.workspace / st.task.final_artifact
+    assert art.exists() and art.suffix == ".html"
+    src = art.read_text()
+    assert "@keyframes" in src and "FAMA" in src and "2.0" in src
+    assert 'src="http' not in src  # self-contained
+
+
+def test_design_artifact_domain_rules():
+    from fama.verification import check_design_artifact
+    good = ("<html><body><style>@keyframes x{}</style>"
+            "<div>FAMA 2.0</div></body></html>")
+    verdict, detail, _ = check_design_artifact(good)
+    assert verdict == "pass"
+    bad = '<html><body><script src="http://evil/x.js"></script>FAMA 2.0</body></html>'
+    verdict, detail, _ = check_design_artifact(bad)
+    assert verdict == "fail" and "zewnętrznych" in detail
+    no_anim = "<html><body>FAMA 2.0</body></html>"
+    verdict, detail, _ = check_design_artifact(no_anim)
+    assert verdict == "fail" and "keyframes" in detail
+
+
+@pytest.mark.asyncio
 async def test_memory_learning_after_runs(tmp_path):
     """Second run of the same problem recalls history (sec. 23-24)."""
     from fama.scenarios import scripted_gateway

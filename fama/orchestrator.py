@@ -38,7 +38,8 @@ from .twin import DigitalTwin
 from .understanding import UnderstandingEngine
 from .verification import (CommonModeDetector, ContradictionEngine,
                            DifferentialRunner, MetamorphicVerifier,
-                           MutationTester, OracleRun, VerificationBudget)
+                           MutationTester, OracleRun, VerificationBudget,
+                           check_design_artifact)
 
 STEP_TOOL_NEEDS = {
     "implement": ["fs_read", "fs_write", "fs_list", "python_run", "test_run"],
@@ -159,9 +160,21 @@ class FAMA:
                       phase="understanding", level="success",
                       payload={"understanding": und.to_dict(), "fallback": res.used_fallback})
             if res.used_fallback:
+                prov = self.gateway.provider_status()
+                with_keys = [k for k in ("openai", "anthropic", "openai_compatible", "openrouter")
+                             if prov.get(k)]
+                diag = ("no LLM provider key configured"
+                        if not prov["any_real"] else
+                        f"provider key(s) present ({', '.join(with_keys)}) but the endpoint "
+                        f"is unreachable or calls are failing")
+                self.emit(st, "model_unreachable",
+                          f"Model unavailable — {diag}. Live tasks need a reachable API "
+                          f"endpoint; SCRIPTED demos and replays keep working.",
+                          level="error", phase="understanding",
+                          payload={"providers": prov, "attempt_notes": res.notes})
                 return await self._finish(st, ResultStatus.BLOCKED,
-                                          "Could not interpret the task — model understanding unavailable",
-                                          t0)
+                                          f"Could not interpret the task — model unavailable "
+                                          f"({diag}). Run `fama doctor` for a diagnosis.", t0)
 
             # ---- ambiguity handling (sec. 5: never fake certainty)
             needs_clarification = (und.ambiguities and und.confidence < 0.55
@@ -908,6 +921,15 @@ class FAMA:
                 return OracleRun(new_id("orun"), kind, "source validation", "fail", 0.4,
                                  "no sources cited — claims unverifiable")
             if kind == OracleKind.DOMAIN_RULE:
+                if artifact and artifact.endswith((".html", ".css")):
+                    try:
+                        src = (st.tools.workspace / artifact).read_text(errors="replace")
+                    except Exception:
+                        return OracleRun(new_id("orun"), kind, artifact, "fail", 0.5,
+                                         f"artifact {artifact} not found in workspace")
+                    verdict, detail, strength = check_design_artifact(src)
+                    return OracleRun(new_id("orun"), kind, artifact, verdict, strength,
+                                     detail, {"checks_passed": verdict == "pass"})
                 return OracleRun(new_id("orun"), kind, "domain rules", "pass", 0.4,
                                  "domain-rule spot checks embedded in review step")
             if kind == OracleKind.HUMAN:

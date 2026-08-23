@@ -259,6 +259,30 @@ async def record(name: str):
     return {"ok": True, "replay": name, "events": len(rep["events"])}
 
 
+@app.get("/api/tasks/{task_id}/artifact")
+async def task_artifact(task_id: str):
+    """Serve the task's final artifact from its real workspace (e.g. HTML preview)."""
+    from fastapi.responses import Response
+    f = fama_app.fama_for(task_id)
+    if not f:
+        return JSONResponse({"error": "unknown task"}, status_code=404)
+    st = f.states.get(task_id)
+    art = st.task.final_artifact if st else ""
+    if not art:
+        return JSONResponse({"error": "task has no artifact"}, status_code=404)
+    p = (st.tools.workspace / art).resolve()
+    ws = str(st.tools.workspace.resolve())
+    if not str(p).startswith(ws):
+        return JSONResponse({"error": "invalid artifact path"}, status_code=400)
+    if not p.exists():
+        return JSONResponse({"error": f"artifact {art} not found"}, status_code=404)
+    ctype = {".html": "text/html; charset=utf-8", ".css": "text/css",
+             ".js": "text/javascript", ".md": "text/markdown; charset=utf-8",
+             ".py": "text/plain; charset=utf-8"}.get(p.suffix, "text/plain; charset=utf-8")
+    return Response(p.read_text(errors="replace"), media_type=ctype,
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/stream")
 async def stream(task_id: Optional[str] = None, replay_from: int = 0):
     q: asyncio.Queue = asyncio.Queue()

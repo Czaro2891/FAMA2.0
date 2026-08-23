@@ -329,6 +329,30 @@ class DifferentialRunner:
                          {"mismatches": n_mism, "cases": n_cases})
 
 
+# ---------------------------------------------------------------- domain rules (sec. 25)
+
+def check_design_artifact(src: str) -> tuple[str, str, float]:
+    """Deterministic domain rules for self-contained animated HTML artifacts.
+
+    Returns (verdict, detail, strength). No LLM involved — a real
+    tool-based source of truth for design deliverables.
+    """
+    checks = {
+        "animacja obecna (@keyframes)": "@keyframes" in src,
+        "tekst FAMA 2.0 obecny": "FAMA" in src and "2.0" in src,
+        "samowystarczalny (brak zewnętrznych zależności)":
+            'src="http' not in src and "src='http" not in src and
+            'href="http' not in src and "href='http" not in src,
+        "struktura HTML poprawna": "<html" in src.lower() and "</html>" in src.lower()
+        and "<body" in src.lower(),
+    }
+    failed = [k for k, v in checks.items() if not v]
+    if failed:
+        return "fail", f"domain rules violated: {', '.join(failed)}", 0.5
+    return "pass", (f"all {len(checks)} domain rules satisfied "
+                    f"({', '.join(checks)})"), 0.5
+
+
 # ---------------------------------------------------------------- contradiction (sec. 28)
 
 class ContradictionEngine:

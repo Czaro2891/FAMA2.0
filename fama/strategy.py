@@ -10,8 +10,8 @@ import re
 from dataclasses import dataclass, field
 
 from .core import (Assumption, AssumptionStatus, AutonomyLevel, Complexity,
-                   OracleKind, RiskLevel, Strategy, StrategyStep, TaskUnderstanding,
-                   clamp, new_id)
+                   OracleKind, RiskLevel, Strategy, StrategyStep, TaskType,
+                   TaskUnderstanding, clamp, new_id)
 from .memory import Recall, StrategyMemory
 from .twin import DigitalTwin, TwinEstimate
 
@@ -32,6 +32,17 @@ RESEARCH_V = [OracleKind.EXTERNAL_SOURCE]
 
 
 def template_single_specialist(und: TaskUnderstanding) -> Strategy:
+    if und.task_type == TaskType.DESIGN:
+        return Strategy(
+            id=new_id("strat"), name="A · Single specialist + domain rules", pattern="specialist",
+            description="One implementer produces the design artifact; deterministic domain rules "
+                        "(self-containment, required content, animation) verify it. Cheapest sensible "
+                        "path for low-risk design work.",
+            steps=[S("implement", "Produce the required artifact", _main_cap(und),
+                     verif=[OracleKind.DOMAIN_RULE], tokens=4200),
+                   S("review", "Independent review of the artifact", "critique", deps=["implement"],
+                     tokens=1600)],
+            verification_bundle=[OracleKind.DOMAIN_RULE], team_size=1)
     ver = TEST if und.risk_level.value in ("negligible", "low") else TEST_MUT
     return Strategy(
         id=new_id("strat"), name="A · Single specialist + test", pattern="specialist",
@@ -172,6 +183,8 @@ FIT = {
     "code_review": {"specialist": 0.9, "pipeline": 0.6},
     "software_architecture": {"pipeline": 0.9, "research_synthesis": 0.6},
     "writing": {"research_synthesis": 0.8, "specialist": 0.6},
+    "design": {"specialist": 0.9, "pipeline": 0.7},
+    "automation": {"pipeline": 0.8, "specialist": 0.6},
     "composite": {"pipeline": 0.8, "dual_implementation": 0.6},
     "unknown": {"pipeline": 0.6, "specialist": 0.5},
 }

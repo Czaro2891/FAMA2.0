@@ -313,7 +313,11 @@ class LLMGateway:
                 return resp
             except NoProviderError:
                 raise
-            except Exception as e:  # 429/5xx/network — retry with backoff
+            except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+                # unreachable endpoint: retrying is pointless — fail fast & honestly
+                raise ModelError(f"endpoint unreachable: {model.provider.value} "
+                                 f"({type(e).__name__}) — check network/`fama doctor`") from e
+            except Exception as e:  # 429/5xx/other — retry with backoff
                 last_err = e
                 await asyncio.sleep(1.5 * (attempt + 1))
         raise ModelError(f"model call failed after retries: {last_err}")

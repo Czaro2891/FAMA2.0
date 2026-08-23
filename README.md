@@ -68,6 +68,7 @@ python -m fama agents | models | memory | doctor
 | `optimize-algorithm` | optymalizacja → strategia F (profil→benchmark→differential vs baseline) |
 | `vague-app` | „zrób coś, żeby była lepsza” → wykryta ambiwalencja → **FAMA pyta zamiast zakładać** |
 | `weak-tests` | słabe testy → **VERIFICATION WEAK** → Contradiction Engine obala wynik → zmiana strategii (PLAN V2) → weryfikacja silna |
+| `animated-title` | „Zbuduj animowany napis FAMA2.0” → design/frontend → specjalista + **deterministyczny oracle DOMAIN_RULE** (samowystarczalność, animacja, treść) → artefakt HTML z podglądem na żywo w zakładce Wynik |
 
 Każdy scenariusz kończy się statusem `VERIFIED` z pełnym łańcuchem dowodów —
 albo uczciwym `FAILED` / `INSUFFICIENT_EVIDENCE` / `BLOCKED`, gdy dowodów brak.

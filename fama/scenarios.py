@@ -801,16 +801,88 @@ CONTRADICTION_PALINDROME = {
     "confidence_claim_is_wrong": 0.8,
 }
 
+# ================================================================ 7. animated title (design)
+
+ANIMATED_TITLE_HTML = Path(__file__).parent / "world" / "animated_fama.html"
+
+ANIMATED = Scenario(
+    name="animated-title",
+    title="Animowany napis FAMA2.0",
+    description="Design/frontend task → single specialist, deterministic DOMAIN-RULE oracle "
+                "(self-containment, animation, required text) + review. Artifact is live-previewable "
+                "in the World UI.",
+    task="Zbuduj animowany napis FAMA2.0",
+    fixtures=_fx([
+        (r"(?s)FAMA:PHASE:UNDERSTANDING.*animowany napis", {
+            "goal": "Build an animated 'FAMA2.0' title as a self-contained HTML artifact",
+            "deliverable": "animated_fama.html with the animated FAMA 2.0 title",
+            "constraints": ["single self-contained HTML file", "no external dependencies"],
+            "risks": ["animation may not degrade gracefully on small screens"],
+            "risk_level": "low",
+            "complexity": "simple",
+            "uncertainties": ["exact visual style preference"],
+            "ambiguities": [],
+            "success_criteria": ["artifact is a valid self-contained HTML file",
+                                 "contains a CSS animation (@keyframes)",
+                                 "displays the text FAMA 2.0"],
+            "domain": "software",
+            "task_type": "design",
+            "required_capabilities": [
+                {"capability": "frontend", "min_quality": 0.5, "importance": 0.9,
+                 "why": "animated HTML/CSS implementation"}],
+            "autonomy": "minimal",
+            "verification_requirements": ["domain_rule"],
+            "interpretation": "a polished, self-contained animated title page",
+            "clarifying_questions": [],
+            "confidence": 0.9}),
+        (r"(?s)FAMA:STEP:implement", {
+            "files": {},   # filled at runtime from fama/world/animated_fama.html
+            "actions": [],
+            "output": "Built animated_fama.html: staggered letter entrance (rotateX + blur + rise), "
+                      "animated gradient shimmer, glow pulse, scanning underline, CSS-only particles, "
+                      "click-to-replay. Fully self-contained.",
+            "artifact": "animated_fama.html",
+            "confidence": 0.92,
+            "assumptions_used": ["dark FAMA brand palette"]}),
+        (r"(?s)FAMA:STEP:review", {
+            "files": {},
+            "actions": [],
+            "output": "Review: single file, no external deps, @keyframes used, responsive via clamp(), "
+                      "prefers accessibility (aria-label); restart interaction is progressive enhancement.",
+            "artifact": "",
+            "confidence": 0.88,
+            "assumptions_used": []}),
+    ]))
+
+
+def animated_title_fixtures() -> list[dict]:
+    """Inject the real HTML file into the implement fixture at runtime."""
+    html = ANIMATED_TITLE_HTML.read_text()
+    fx = []
+    for f in ANIMATED.fixtures:
+        if "FAMA:STEP:implement" in f["match"]:
+            import json as _json
+            data = _json.loads(f["text"])
+            data["files"] = {"animated_fama.html": html}
+            fx.append({"match": f["match"], "text": _json.dumps(data, ensure_ascii=False)})
+        else:
+            fx.append(f)
+    return fx
+
+
 # ================================================================ registry
 
 SCENARIOS: dict[str, Scenario] = {
-    s.name: s for s in [SIMPLE, PAYMENTS, RESEARCH, OPTIMIZE, VAGUE, WEAK]
+    s.name: s for s in [SIMPLE, PAYMENTS, RESEARCH, OPTIMIZE, VAGUE, WEAK, ANIMATED]
 }
 
 
 def scenario_fixtures(sc: Scenario) -> list[dict]:
     """Fixtures incl. phase-generic ones (autopsy, contradiction)."""
-    fx = list(sc.fixtures)
+    if sc.name == "animated-title":
+        fx = list(animated_title_fixtures())
+    else:
+        fx = list(sc.fixtures)
     fx.append({"match": r"(?s)FAMA:PHASE:CONTRADICTION.*is_palindrome",
                "text": json.dumps(CONTRADICTION_PALINDROME)})
     fx.append({"match": r"FAMA:PHASE:CONTRADICTION",
