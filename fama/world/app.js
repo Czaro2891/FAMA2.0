@@ -191,6 +191,10 @@ async function openReplay(name) {
 // ---------------------------------------------------------------- bridge
 
 const bridge = { connected: false, base: "", timer: null, models: [] };
+try {
+  const saved = localStorage.getItem("fama_bridge_url");
+  if (saved) document.getElementById("bridge-url").value = saved;
+} catch (e) { /* private mode */ }
 
 $("#btn-bridge").onclick = async () => {
   const btn = $("#btn-bridge"), status = $("#bridge-status"), tag = $("#bridge-tag");
@@ -202,15 +206,24 @@ $("#btn-bridge").onclick = async () => {
   btn.disabled = true;
   status.textContent = "łączę z " + base + " …";
   try {
-    // the BROWSER reaches the user's localhost (the sandbox cannot)
-    const r = await fetch(base + "/models", { headers: { "Content-Type": "application/json" } });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const data = await r.json();
+    // the BROWSER reaches the user's LAN/localhost (the sandbox cannot).
+    // Probe both OpenAI-compatible path layouts: with and without /v1.
+    let apiBase = null, data = null;
+    for (const suffix of ["/models", "/v1/models"]) {
+      try {
+        const r = await fetch(base + suffix, { headers: { "Content-Type": "application/json" } });
+        if (!r.ok) continue;
+        const d = await r.json();
+        if (d && Array.isArray(d.data) && d.data.length) { apiBase = (base + suffix).replace(/\/models$/, ""); data = d; break; }
+      } catch (e) { /* try next layout */ }
+    }
+    if (!apiBase) throw new Error("Failed to fetch (brak modeli ani pod /models, ani /v1/models)");
     const ids = (data.data || []).map(m => m.id).filter(Boolean).slice(0, 40);
     if (!ids.length) throw new Error("endpoint nie zwrócił modeli");
+    localStorage.setItem("fama_bridge_url", base);
     await api("/api/bridge/models", { method: "POST", body: JSON.stringify({ models: ids, base_url: base }) });
     bridge.connected = true;
-    bridge.base = base;
+    bridge.base = apiBase;
     bridge.models = ids;
     tag.textContent = "LIVE · " + ids.length + " modeli";
     tag.className = "tag scripted";
@@ -227,7 +240,8 @@ $("#btn-bridge").onclick = async () => {
     let hint;
     if (/Failed to fetch|NetworkError|load failed/i.test(msg)) {
       hint = "✗ Przeglądarka zablokowała połączenie (Chrome PNA / CORS) albo nic nie słucha na tym porcie." +
-        "<br><b>Naprawa:</b> uruchom <span class='mono'>python examples/bridge_helper.py</span> na swoim komputerze " +
+        "<br><b>Naprawa (LM Studio):</b> Developer → Server <b>ON</b> + <b>Enable CORS</b> (Servowanie w sieci LAN też ON). " +
+        "<b>Chrome:</b> dodatkowo uruchom <span class='mono'>python examples/bridge_helper.py --target http://192.168.18.199:1234</span> i użyj URL <span class='mono'>http://localhost:8790/v1</span>. " +
         "(plik w repo FAMA2.0) i użyj URL <span class='mono'>http://localhost:8790/v1</span>. " +
         "Firefox: bez helpera, z <span class='mono'>OLLAMA_ORIGINS=* ollama serve</span>.";
     } else {
