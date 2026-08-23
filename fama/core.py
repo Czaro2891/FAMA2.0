@@ -198,7 +198,9 @@ class ProviderKind(str, enum.Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OPENAI_COMPATIBLE = "openai_compatible"
-    SCRIPTED = "scripted"  # deterministic test double; never used unless explicitly enabled
+    OPENROUTER = "openrouter"
+    BRIDGE = "bridge"            # user's local model, served via the browser bridge
+    SCRIPTED = "scripted"        # deterministic test double; never used unless explicitly enabled
 
 
 class CapabilitySource(str, enum.Enum):

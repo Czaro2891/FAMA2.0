@@ -283,6 +283,84 @@ async def task_artifact(task_id: str):
                     headers={"Cache-Control": "no-store"})
 
 
+# ---------------------------------------------------------------- browser bridge
+
+@app.post("/api/bridge/enable")
+async def bridge_enable(req: Request):
+    """Enable the browser bridge: the user's local LLM serves live requests."""
+    body = await req.json()
+    b = fama_app.live.gateway.bridge
+    b.enabled = True
+    b.base_url = str(body.get("base_url", "")).strip()
+    fama_app.live.emit_bridge_event("bridge_enabled",
+                                    f"Bridge enabled -> {b.base_url or '(no url yet)'}")
+    return {"ok": True, "base_url": b.base_url}
+
+
+@app.post("/api/bridge/models")
+async def bridge_models(req: Request):
+    """Browser posts the model list discovered on the user's local endpoint."""
+    body = await req.json()
+    ids = [str(m).strip() for m in body.get("models", []) if str(m).strip()]
+    b = fama_app.live.gateway.bridge
+    b.enabled = True
+    b.set_models(ids)
+    fama_app.live.emit_bridge_event(
+        "bridge_models", f"Bridge: {len(ids)} local model(s) registered "
+        f"({', '.join(ids[:4])}{'...' if len(ids) > 4 else ''})")
+    return {"ok": True, "models": [m.to_dict() for m in b.models]}
+
+
+@app.get("/api/bridge/pending")
+async def bridge_pending():
+    b = fama_app.live.gateway.bridge
+    out = []
+    for rid, meta in list(b.pending.items()):
+        req = meta["req"]
+        out.append({"id": rid, "model": meta["model_id"],
+                    "task_id": meta.get("task_id", ""),
+                    "purpose": meta.get("purpose", ""),
+                    "messages": [{"role": m.role, "content": m.content}
+                                 for m in req.messages],
+                    "max_tokens": req.max_tokens, "temperature": req.temperature,
+                    "json_mode": req.json_mode})
+    return {"pending": out, "served": b.served}
+
+
+@app.post("/api/bridge/complete")
+async def bridge_complete(req: Request):
+    body = await req.json()
+    b = fama_app.live.gateway.bridge
+    ok = b.resolve(str(body.get("id", "")), str(body.get("content", "")),
+                   int(body.get("tokens_in", 0) or 0), int(body.get("tokens_out", 0) or 0))
+    return {"ok": ok}
+
+
+@app.post("/api/bridge/fail")
+async def bridge_fail(req: Request):
+    body = await req.json()
+    b = fama_app.live.gateway.bridge
+    ok = b.fail(str(body.get("id", "")), str(body.get("error", "unknown bridge error")))
+    return {"ok": ok}
+
+
+@app.post("/api/bridge/disable")
+async def bridge_disable():
+    b = fama_app.live.gateway.bridge
+    b.disable()
+    fama_app.live.emit_bridge_event("bridge_disabled", "Bridge disconnected", "warning")
+    return {"ok": True}
+
+
+@app.get("/api/bridge/status")
+async def bridge_status():
+    b = fama_app.live.gateway.bridge
+    return {"enabled": b.enabled, "base_url": b.base_url,
+            "models": [m.model_id for m in b.models],
+            "pending": len(b.pending), "served": b.served,
+            "last_error": b.last_error}
+
+
 @app.get("/api/stream")
 async def stream(task_id: Optional[str] = None, replay_from: int = 0):
     q: asyncio.Queue = asyncio.Queue()

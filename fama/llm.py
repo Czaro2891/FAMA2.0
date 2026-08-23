@@ -213,6 +213,71 @@ class ScriptedProvider:
         return json.dumps({"note": "scripted-fallback", "prompt_head": prompt[:200]})
 
 
+class BridgeProvider:
+    """Serves LLM requests through the USER'S local model via the browser.
+
+    Topology: the sandbox cannot reach the user's localhost, but their
+    browser can reach both. The World UI polls pending requests, calls the
+    local OpenAI-compatible endpoint (Ollama/LM Studio/...) and posts the
+    response back. This is REAL live inference on the user's own model —
+    clearly labelled 'bridge' everywhere.
+    """
+
+    def __init__(self, timeout_s: float = 180.0):
+        self.enabled = False
+        self.base_url = ""
+        self.timeout_s = timeout_s
+        self.pending: dict[str, dict] = {}
+        self.served = 0
+        self.models: list[ModelInfo] = []
+        self.last_error = ""
+
+    def set_models(self, ids: list[str]):
+        self.models = [self._make(m) for m in ids[:40]]
+
+    @staticmethod
+    def _make(model_id: str) -> ModelInfo:
+        base = classify_local_model(model_id)
+        return ModelInfo(f"bridge/{model_id}", model_id, ProviderKind.BRIDGE,
+                         base.classes, 0.0, 0.0, base.latency_s, base.quality,
+                         note="user's local model via browser bridge")
+
+    def submit(self, model_id: str, req: "LLMRequest", task_id: str = "",
+               purpose: str = "") -> tuple[str, asyncio.Future]:
+        rid = new_id("brq")
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        self.pending[rid] = {"future": fut, "model_id": model_id, "req": req,
+                             "task_id": task_id, "purpose": purpose}
+        return rid, fut
+
+    def resolve(self, rid: str, content: str, tokens_in: int, tokens_out: int) -> bool:
+        meta = self.pending.pop(rid, None)
+        if meta is None or meta["future"].done():
+            return False
+        self.served += 1
+        meta["future"].set_result((content, tokens_in, tokens_out))
+        return True
+
+    def fail(self, rid: str, error: str) -> bool:
+        meta = self.pending.pop(rid, None)
+        if meta is None or meta["future"].done():
+            return False
+        self.last_error = error[:300]
+        meta["future"].set_exception(ModelError(f"bridge error: {error[:300]}"))
+        return True
+
+    def drop(self, rid: str):
+        self.pending.pop(rid, None)
+
+    def fail_all(self, reason: str):
+        for rid in list(self.pending):
+            self.fail(rid, reason)
+
+    def disable(self):
+        self.enabled = False
+        self.fail_all("bridge disconnected")
+
+
 class LLMGateway:
     """Single entry point for every model call. Tracks usage & cost."""
 
@@ -228,6 +293,7 @@ class LLMGateway:
         self._client: httpx.AsyncClient | None = None
         self._lock = asyncio.Lock()
         self._local_cache: tuple[float, list[ModelInfo]] | None = None  # (ts, models)
+        self.bridge = BridgeProvider()
 
     # ---------------------------------------------------------- providers
 
@@ -241,10 +307,11 @@ class LLMGateway:
                                       (os.environ.get("OPENAI_API_KEY") or local)),
             "openrouter": bool(os.environ.get("OPENROUTER_API_KEY")),
             "local": local,
+            "bridge": self.bridge.enabled and bool(self.bridge.models),
             "scripted": self.allow_scripted,
         }
         s["any_real"] = s["openai"] or s["anthropic"] or s["openai_compatible"] \
-            or s["openrouter"]
+            or s["openrouter"] or s["bridge"]
         return s
 
     def local_base(self) -> str | None:
@@ -343,6 +410,11 @@ class LLMGateway:
                                         ProviderKind.OPENAI_COMPATIBLE,
                                         _mc("fast", "coding"), 0.0, 0.0, 12.0, 0.7,
                                         note="configured default model of the local endpoint"))
+        if self.bridge.enabled and self.bridge.models:
+            have = {m.id for m in models}
+            for bm in self.bridge.models:
+                if bm.id not in have:
+                    models.append(bm)
         return models
 
     def available_models(self) -> list[ModelInfo]:
@@ -396,6 +468,44 @@ class LLMGateway:
             self._account(resp, req)
             return resp
         model = self.route(req)
+        # browser bridge: the user's local model answers via the World UI
+        if model.provider == ProviderKind.BRIDGE:
+            return await self._bridge_complete(model, req, t0)
+        try:
+            return await self._remote_complete(model, req, t0)
+        except ModelError:
+            # adaptive model change (sec. 15/17): remote failed -> the user's
+            # local model via the bridge is a real fallback when connected
+            if self.bridge.enabled and self.bridge.models:
+                alt = next((m for m in self.bridge.models
+                            if req.model_class is None or req.model_class in m.classes),
+                           None) or self.bridge.models[0]
+                return await self._bridge_complete(alt, req, t0)
+            raise
+
+    async def _bridge_complete(self, model: ModelInfo, req: LLMRequest,
+                               t0: float) -> LLMResponse:
+        rid, fut = self.bridge.submit(model.model_id, req, purpose=req.purpose)
+        try:
+            text, tin, tout = await asyncio.wait_for(fut, timeout=self.bridge.timeout_s)
+        except asyncio.TimeoutError:
+            self.bridge.drop(rid)
+            raise ModelError("bridge: no response from the browser/local model "
+                             "in time — is the Bridge panel connected and the "
+                             "local server running?")
+        except ModelError:
+            raise
+        except Exception as e:
+            raise ModelError(f"bridge failed: {e}") from e
+        tin = int(tin or 0) or sum(len(m.content) for m in req.messages) // 4
+        tout = int(tout or 0) or len(text) // 4
+        resp = LLMResponse(text, model.id, ProviderKind.BRIDGE, tin, tout,
+                           0.0, time.monotonic() - t0)
+        self._account(resp, req)
+        return resp
+
+    async def _remote_complete(self, model: ModelInfo, req: LLMRequest,
+                               t0: float) -> LLMResponse:
         last_err: Exception | None = None
         for attempt in range(3):
             try:

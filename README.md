@@ -41,6 +41,27 @@ Jeśli endpoint nie udostępnia listy modeli: ustaw `FAMA_COMPAT_DEFAULT_MODEL=n
 Test integracji bez modelu: `python examples/local_llm_demo.py` (jawnie oznaczony
 serwer demo — **nie** jest modelem AI) + przykład w nagłówku pliku.
 
+### Bridge: podgląd (sandbox) ↔ Twój lokalny LLM przez przeglądarkę
+
+Sandbox Areny nie widzi Twojego localhostu, ale **Twoja przeglądarka widzi jedno i drugie**.
+Panel **„Bridge — Twój lokalny LLM"** w World UI wykorzystuje tę topologię: serwer
+kolejkuje zapytania, przeglądarka odpytuje Twój lokalny endpoint i odsyła odpowiedzi —
+to realny tryb LIVE na Twoim modelu (koszt $0), jawnie oznaczony `bridge/*` w evidence
+i metrykach.
+
+```bash
+# 1) uruchom lokalny model z CORS (Ollama):
+OLLAMA_ORIGINS=* ollama serve          # potem: ollama pull qwen2.5-coder:7b
+# 2) w World UI (podgląd Areny): panel Bridge -> URL http://localhost:11434/v1 -> "Połącz"
+# 3) wyślij zadanie — pill pokaże: LIVE · BRIDGE (Twój lokalny model)
+```
+
+Dodatkowo gateway stosuje **adaptacyjną zmianę modelu** (§15/§17): jeśli zdalny provider
+padnie, a bridge jest podłączony, wywołanie automatycznie spada na Twój lokalny model.
+Uwaga: niektóre przeglądarki (Private Network Access) mogą blokować fetch z HTTPS do
+localhost — wtedy użyj uruchomienia FAMA lokalnie (opcja wyżej) lub zezwól na połączenie
+w ustawieniach przeglądarki.
+
 ### API chmurowe
 
 ```bash

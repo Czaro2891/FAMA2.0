@@ -1102,6 +1102,12 @@ class FAMA:
         self.store.put("tasks", task.id, task.to_dict())
         return task
 
+    # ------------------------------------------------------------ bridge events
+
+    def emit_bridge_event(self, type_: str, title: str, level: str = "info"):
+        self.bus.publish(Event(type_, phase="bridge", level=level, title=title,
+                               payload={"bridge": True}))
+
     # ------------------------------------------------------------ human interaction
 
     def answer_clarification(self, task_id: str, answers: list[str]) -> bool:

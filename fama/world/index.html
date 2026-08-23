@@ -45,6 +45,14 @@
       <p class="hint" id="submit-hint"></p>
     </section>
 
+    <section class="panel" id="bridge-panel">
+      <h2>Bridge — Twój lokalny LLM <span class="tag" id="bridge-tag">OFF</span></h2>
+      <p class="hint" style="margin:0 0 6px">Przeglądarka pośredniczy między tym UI a modelem na Twoim komputerze (Ollama/LM Studio). Sandbox nie widzi Twojego localhostu — przeglądarka tak.</p>
+      <input id="bridge-url" value="http://localhost:11434/v1" placeholder="http://localhost:11434/v1">
+      <button id="btn-bridge" class="primary" style="margin-top:8px">Połącz z lokalnym modelem</button>
+      <div id="bridge-status" class="hint">Najpierw uruchom model lokalnie. Dla Ollama z CORS: <span class="mono">OLLAMA_ORIGINS=* ollama serve</span></div>
+    </section>
+
     <section class="panel">
       <h2>Scenariusze demo <span class="tag scripted">SCRIPTED</span></h2>
       <div id="scenarios"></div>

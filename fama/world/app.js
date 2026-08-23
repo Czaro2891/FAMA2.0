@@ -49,10 +49,13 @@ async function boot() {
 function renderProviderPill() {
   const p = $("#provider-pill");
   const h = state.health;
-  const provs = Object.entries(h.providers || {}).filter(([k]) => k !== "any_real" && k !== "scripted")
+  const provs = Object.entries(h.providers || {}).filter(([k]) => !["any_real", "scripted"].includes(k))
     .map(([k, v]) => `${k}:${v ? "✓" : "—"}`).join("  ");
-  if (h.providers && h.providers.any_real) {
-    p.className = "pill ok"; p.textContent = "LIVE · " + provs;
+  if (h.providers && h.providers.bridge) {
+    p.className = "pill ok"; p.textContent = "LIVE · BRIDGE (Twój lokalny model)";
+  } else if (h.providers && h.providers.any_real) {
+    p.className = "pill warn"; p.textContent = "KEY ✓ / SIEĆ ✗ · połącz Bridge →";
+    p.title = "Klucz API jest, ale endpoint bywa nieosiągalny z tego środowiska. Panel 'Bridge' łączy przez Twoją przeglądarkę.";
   } else {
     p.className = "pill warn"; p.textContent = "NO PROVIDER · " + provs;
     p.title = h.warning || "";
@@ -183,6 +186,103 @@ async function openReplay(name) {
   $("#empty-state").hidden = true;
   $("#task-view").hidden = false;
   renderAll();
+}
+
+// ---------------------------------------------------------------- bridge
+
+const bridge = { connected: false, base: "", timer: null, models: [] };
+
+$("#btn-bridge").onclick = async () => {
+  const btn = $("#btn-bridge"), status = $("#bridge-status"), tag = $("#bridge-tag");
+  if (bridge.connected) {
+    bridgeDisconnect();
+    return;
+  }
+  const base = $("#bridge-url").value.trim().replace(/\/+$/, "");
+  btn.disabled = true;
+  status.textContent = "łączę z " + base + " …";
+  try {
+    // the BROWSER reaches the user's localhost (the sandbox cannot)
+    const r = await fetch(base + "/models", { headers: { "Content-Type": "application/json" } });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const ids = (data.data || []).map(m => m.id).filter(Boolean).slice(0, 40);
+    if (!ids.length) throw new Error("endpoint nie zwrócił modeli");
+    await api("/api/bridge/models", { method: "POST", body: JSON.stringify({ models: ids, base_url: base }) });
+    bridge.connected = true;
+    bridge.base = base;
+    bridge.models = ids;
+    tag.textContent = "LIVE · " + ids.length + " modeli";
+    tag.className = "tag scripted";
+    tag.style.color = "var(--ok)"; tag.style.borderColor = "var(--ok)";
+    btn.textContent = "Rozłącz bridge";
+    status.innerHTML = "✓ Połączono: " + esc(ids.slice(0, 3).join(", ")) +
+      (ids.length > 3 ? " +" + (ids.length - 3) : "") +
+      " — zadania lecą przez TWÓJ model (koszt $0). Pętla obsługi aktywna.";
+    startBridgeLoop();
+    state.health = await api("/api/health");
+    renderProviderPill();
+  } catch (e) {
+    status.innerHTML = "✗ " + esc(e.message) + " — sprawdź, czy model działa i zezwala na CORS " +
+      "(Ollama: <span class='mono'>OLLAMA_ORIGINS=* ollama serve</span>; LM Studio: włącz CORS w ustawieniach serwera).";
+  }
+  btn.disabled = false;
+};
+
+function bridgeDisconnect() {
+  bridge.connected = false;
+  stopBridgeLoop();
+  api("/api/bridge/disable", { method: "POST" }).catch(() => {});
+  const tag = $("#bridge-tag");
+  tag.textContent = "OFF"; tag.style.color = ""; tag.style.borderColor = "";
+  $("#btn-bridge").textContent = "Połącz z lokalnym modelem";
+  $("#bridge-status").textContent = "Bridge rozłączony.";
+  api("/api/health").then(h => { state.health = h; renderProviderPill(); }).catch(() => {});
+}
+
+function startBridgeLoop() {
+  stopBridgeLoop();
+  bridge.timer = setInterval(serveBridge, 1500);
+  serveBridge();
+}
+
+function stopBridgeLoop() {
+  if (bridge.timer) { clearInterval(bridge.timer); bridge.timer = null; }
+}
+
+async function serveBridge() {
+  if (!bridge.connected || document.hidden) return;
+  let pend;
+  try {
+    pend = await api("/api/bridge/pending");
+  } catch (e) { return; }
+  for (const p of pend.pending || []) {
+    try {
+      const r = await fetch(bridge.base + "/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: p.model, messages: p.messages, max_tokens: p.max_tokens,
+          temperature: p.temperature, stream: false,
+        }),
+      });
+      if (!r.ok) throw new Error("local HTTP " + r.status);
+      const data = await r.json();
+      const content = data.choices && data.choices[0] &&
+        data.choices[0].message && data.choices[0].message.content || "";
+      const usage = data.usage || {};
+      await api("/api/bridge/complete", { method: "POST", body: JSON.stringify({
+        id: p.id, content,
+        tokens_in: usage.prompt_tokens || usage.input_tokens || 0,
+        tokens_out: usage.completion_tokens || usage.output_tokens || 0,
+      }) });
+    } catch (e) {
+      await api("/api/bridge/fail", { method: "POST", body: JSON.stringify({
+        id: p.id, error: "browser->local call failed: " + e.message }) }).catch(() => {});
+      $("#bridge-status").innerHTML = "✗ błąd wywołania lokalnego: " + esc(e.message) +
+        " (CORS? OLLAMA_ORIGINS?)";
+    }
+  }
 }
 
 // ---------------------------------------------------------------- new task
@@ -583,9 +683,23 @@ function renderResult() {
         <a href="/api/tasks/${t.id}/artifact" target="_blank">otwórz artefakt w nowej karcie ↗</a>
       </p>`;
   }
+  const blockedHelp = (rs === "blocked" &&
+    /model unavailable|no provider/i.test(t.result_summary || "")) ? `
+      <div class="gate clar">
+        <h3>Jak odpalić LIVE</h3>
+        <p><b>Opcja 1 — Bridge (tu, w tym UI):</b> panel „Bridge — Twój lokalny LLM” po lewej →
+        uruchom model lokalnie (np. <span class="mono">OLLAMA_ORIGINS=* ollama serve</span>) →
+        „Połącz z lokalnym modelem” → wyślij zadanie ponownie.</p>
+        <p><b>Opcja 2 — na Twojej maszynie:</b></p>
+        <pre class="code">git clone https://github.com/Czaro2891/FAMA2.0 &amp;&amp; cd FAMA2.0
+pip install -r requirements.txt
+echo 'OPENAI_BASE_URL=http://localhost:11434/v1' &gt; .env
+python -m fama serve</pre>
+      </div>` : "";
   el.innerHTML = `
     <div class="result-banner ${esc(rs)}">${esc(rs.toUpperCase())}</div>
     <p>${esc(t.result_summary || "")}</p>
+    ${blockedHelp}
     ${preview}
     <div class="cards" style="margin-top:12px">
       <div class="card"><h4>Koszt</h4>${fmtCost(t.cost_usd)}</div>
