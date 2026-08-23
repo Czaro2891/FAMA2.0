@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FAMA 2.0 — World</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">
+    <span class="logo">▚▞</span>
+    <div>
+      <h1>FAMA 2.0</h1>
+      <span class="sub">Adaptive Agent Operating System</span>
+    </div>
+  </div>
+  <div id="sysbar">
+    <span id="provider-pill" class="pill">…</span>
+    <span id="metrics-pill" class="pill dim"></span>
+    <a href="/docs" target="_blank" class="pill link">API</a>
+  </div>
+</header>
+
+<div id="layout">
+  <aside id="sidebar">
+    <section class="panel">
+      <h2>Nowe zadanie</h2>
+      <textarea id="task-input" rows="4" placeholder="Opisz problem…"></textarea>
+      <div class="row">
+        <label>Autonomia
+          <select id="task-autonomy">
+            <option value="">auto</option>
+            <option value="minimal">minimal</option>
+            <option value="standard">standard</option>
+            <option value="high">high</option>
+            <option value="critical">critical</option>
+          </select>
+        </label>
+        <label>Budżet $
+          <input id="task-cost" type="number" value="2" min="0.1" step="0.5">
+        </label>
+      </div>
+      <button id="btn-submit" class="primary">Uruchom FAMA</button>
+      <p class="hint" id="submit-hint"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Scenariusze demo <span class="tag scripted">SCRIPTED</span></h2>
+      <div id="scenarios"></div>
+    </section>
+
+    <section class="panel">
+      <h2>Replaye</h2>
+      <div id="replays" class="dim small">brak — nagraj przyciskiem ↺</div>
+    </section>
+
+    <section class="panel">
+      <h2>Zadania</h2>
+      <div id="tasks"></div>
+    </section>
+  </aside>
+
+  <main id="main">
+    <div id="empty-state">
+      <div class="big">▚▞</div>
+      <p>Wyślij zadanie, uruchom scenariusz demo (deterministyczny, offline) lub otwórz replay.</p>
+      <p class="dim">Bez kluczy API zadania live zablokują się uczciwie: BLOCKED — no provider.</p>
+    </div>
+    <div id="task-view" hidden>
+      <div id="task-header">
+        <div>
+          <h2 id="task-title"></h2>
+          <div id="task-badges"></div>
+        </div>
+        <div id="task-cost-box"></div>
+      </div>
+      <div id="interact"></div>
+      <nav id="tabs">
+        <button data-tab="timeline" class="active">Kronika</button>
+        <button data-tab="understanding">Interpretacja</button>
+        <button data-tab="strategies">Strategie</button>
+        <button data-tab="team">Zespół i plan</button>
+        <button data-tab="verification">Weryfikacja</button>
+        <button data-tab="evidence">Evidence</button>
+        <button data-tab="decisions">Decyzje</button>
+        <button data-tab="result">Wynik</button>
+      </nav>
+      <section id="tab-timeline" class="tab"></section>
+      <section id="tab-understanding" class="tab" hidden></section>
+      <section id="tab-strategies" class="tab" hidden></section>
+      <section id="tab-team" class="tab" hidden></section>
+      <section id="tab-verification" class="tab" hidden></section>
+      <section id="tab-evidence" class="tab" hidden></section>
+      <section id="tab-decisions" class="tab" hidden></section>
+      <section id="tab-result" class="tab" hidden></section>
+    </div>
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
