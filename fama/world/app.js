@@ -223,8 +223,17 @@ $("#btn-bridge").onclick = async () => {
     state.health = await api("/api/health");
     renderProviderPill();
   } catch (e) {
-    status.innerHTML = "✗ " + esc(e.message) + " — sprawdź, czy model działa i zezwala na CORS " +
-      "(Ollama: <span class='mono'>OLLAMA_ORIGINS=* ollama serve</span>; LM Studio: włącz CORS w ustawieniach serwera).";
+    const msg = String(e.message || e);
+    let hint;
+    if (/Failed to fetch|NetworkError|load failed/i.test(msg)) {
+      hint = "✗ Przeglądarka zablokowała połączenie (Chrome PNA / CORS) albo nic nie słucha na tym porcie." +
+        "<br><b>Naprawa:</b> uruchom <span class='mono'>python examples/bridge_helper.py</span> na swoim komputerze " +
+        "(plik w repo FAMA2.0) i użyj URL <span class='mono'>http://localhost:8790/v1</span>. " +
+        "Firefox: bez helpera, z <span class='mono'>OLLAMA_ORIGINS=* ollama serve</span>.";
+    } else {
+      hint = "✗ " + esc(msg) + " — sprawdź, czy model działa; pomocne: <span class='mono'>curl http://localhost:11434/v1/models</span>";
+    }
+    status.innerHTML = hint;
   }
   btn.disabled = false;
 };

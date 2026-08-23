@@ -50,11 +50,18 @@ to realny tryb LIVE na Twoim modelu (koszt $0), jawnie oznaczony `bridge/*` w ev
 i metrykach.
 
 ```bash
-# 1) uruchom lokalny model z CORS (Ollama):
-OLLAMA_ORIGINS=* ollama serve          # potem: ollama pull qwen2.5-coder:7b
-# 2) w World UI (podgląd Areny): panel Bridge -> URL http://localhost:11434/v1 -> "Połącz"
-# 3) wyślij zadanie — pill pokaże: LIVE · BRIDGE (Twój lokalny model)
+# 1) model (terminal 1):
+ollama serve                            # potem: ollama pull qwen2.5-coder:7b
+# 2) helper (terminal 2 — wymagany w Chrome; zero zależności):
+python examples/bridge_helper.py       # LM Studio: --target http://127.0.0.1:1234
+# 3) w World UI (podgląd Areny): panel Bridge -> URL http://localhost:8790/v1 -> "Połącz"
+# 4) wyślij zadanie — pill pokaże: LIVE · BRIDGE (Twój lokalny model)
 ```
+
+**Dlaczego helper?** Chrome (Private Network Access) blokuje fetch z HTTPS do localhost,
+chyba że serwer lokalny odsyła `Access-Control-Allow-Private-Network: true` + CORS.
+Ollama tego nie robi — `bridge_helper.py` tak (weryfikowane testami). Firefox łączy się
+bez helpera przy `OLLAMA_ORIGINS=* ollama serve` (URL `http://localhost:11434/v1`).
 
 Dodatkowo gateway stosuje **adaptacyjną zmianę modelu** (§15/§17): jeśli zdalny provider
 padnie, a bridge jest podłączony, wywołanie automatycznie spada na Twój lokalny model.

@@ -48,9 +48,22 @@
     <section class="panel" id="bridge-panel">
       <h2>Bridge — Twój lokalny LLM <span class="tag" id="bridge-tag">OFF</span></h2>
       <p class="hint" style="margin:0 0 6px">Przeglądarka pośredniczy między tym UI a modelem na Twoim komputerze (Ollama/LM Studio). Sandbox nie widzi Twojego localhostu — przeglądarka tak.</p>
-      <input id="bridge-url" value="http://localhost:11434/v1" placeholder="http://localhost:11434/v1">
+      <input id="bridge-url" value="http://localhost:8790/v1" placeholder="http://localhost:8790/v1">
       <button id="btn-bridge" class="primary" style="margin-top:8px">Połącz z lokalnym modelem</button>
-      <div id="bridge-status" class="hint">Najpierw uruchom model lokalnie. Dla Ollama z CORS: <span class="mono">OLLAMA_ORIGINS=* ollama serve</span></div>
+      <div id="bridge-status" class="hint">Chrome blokuje HTTPS→localhost (PNA) — uruchom helper (instrukcja niżej)</div>
+      <details style="margin-top:8px">
+        <summary class="small dim" style="cursor:pointer">instrukcja (3 kroki)</summary>
+        <pre class="code" style="font-size:10.5px;margin-top:6px"># 1) model (terminal 1):
+ollama serve
+
+# 2) helper (terminal 2, plik z repo FAMA2.0):
+python examples/bridge_helper.py
+#   (LM Studio: --target http://127.0.0.1:1234)
+
+# 3) tutaj: URL http://localhost:8790/v1 i „Połącz”
+# Firefox bez helpera: http://localhost:11434/v1
+#   + OLLAMA_ORIGINS=* ollama serve</pre>
+      </details>
     </section>
 
     <section class="panel">
