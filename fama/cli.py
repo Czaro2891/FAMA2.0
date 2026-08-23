@@ -48,6 +48,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 # ---------------------------------------------------------------- commands
 
+def _probe(url: str, timeout: float = 4.0) -> bool:
+    try:
+        import httpx
+        r = httpx.get(url, timeout=timeout)
+        return r.status_code < 500
+    except Exception:
+        return False
+
+
 def cmd_doctor():
     from .llm import LLMGateway
     g = LLMGateway()
@@ -59,10 +68,13 @@ def cmd_doctor():
             continue
         print(f"    {k:18s} {'OK' if v else '—'}")
     if not prov["any_real"]:
-        print("  ! no real provider: set OPENAI_API_KEY and/or ANTHROPIC_API_KEY")
+        print("  ! no real provider: set OPENAI_API_KEY, ANTHROPIC_API_KEY or OPENROUTER_API_KEY")
         print("    (OPENAI_BASE_URL adds any OpenAI-compatible endpoint; FAMA_MODELS registers models)")
     if not (os.environ.get("TAVILY_API_KEY") or os.environ.get("BRAVE_API_KEY")):
         print("  ! web_search disabled: set TAVILY_API_KEY or BRAVE_API_KEY")
+    if prov.get("openrouter"):
+        ok = _probe("https://openrouter.ai/api/v1/models")
+        print(f"  openrouter endpoint: {'reachable' if ok else 'UNREACHABLE from this network'}")
     print("  models:")
     for m in g.catalog():
         print(f"    {'*' if m.available else ' '} {m.id:38s} "

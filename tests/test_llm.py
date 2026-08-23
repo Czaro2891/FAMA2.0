@@ -31,7 +31,8 @@ def test_extract_json_variants():
 
 
 def test_route_no_provider(monkeypatch):
-    for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL"):
+    for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL",
+              "OPENROUTER_API_KEY"):
         monkeypatch.delenv(k, raising=False)
     gw = LLMGateway()
     with pytest.raises(NoProviderError):
@@ -42,12 +43,29 @@ def test_route_respects_exclusions(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "k")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     gw = LLMGateway()
     models = gw.available_models()
     assert models, "openai key should enable openai models"
     first = models[0]
     m = gw.route(LLMRequest(messages=[], exclude_models=[first.id]))
     assert m.id != first.id
+
+
+def test_openrouter_provider_enables_models(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    for k in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    gw = LLMGateway()
+    s = gw.provider_status()
+    assert s["openrouter"] is True and s["any_real"] is True
+    ids = [m.id for m in gw.available_models()]
+    assert "openrouter/openai/gpt-4o-mini" in ids
+    assert "openrouter/anthropic/claude-sonnet-4.5" in ids
+    # direct OpenAI models must NOT be enabled by an OpenRouter key
+    assert "openai/gpt-4o-mini" not in ids
+    m = gw.route(LLMRequest(messages=[], model_class=ModelClass.CHEAP))
+    assert m.id.startswith("openrouter/")
 
 
 def test_env_registered_models(monkeypatch):

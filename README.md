@@ -26,7 +26,8 @@ FAMA używa **prawdziwych modeli przez API** — brak klucza = uczciwy status
 ```bash
 export OPENAI_API_KEY=sk-...            # provider OpenAI
 export ANTHROPIC_API_KEY=sk-ant-...     # provider Anthropic
-# opcjonalnie dowolny endpoint kompatybilny z OpenAI (OpenRouter, vLLM, Ollama...):
+export OPENROUTER_API_KEY=sk-or-v1-...  # OpenRouter (6 modeli: gpt-4o-mini/haiku/sonnet/o4-mini/opus...)
+# opcjonalnie dowolny endpoint kompatybilny z OpenAI (vLLM, Ollama, LM Studio...):
 export OPENAI_BASE_URL=http://localhost:11434/v1
 export FAMA_COMPAT_DEFAULT_MODEL=qwen2.5-coder:14b
 # rejestracja własnych modeli (provider:id:klasy:cena_in:cena_out za Mtok):
@@ -36,7 +37,11 @@ export FAMA_MODELS="openai_compatible:my-model:fast+cheap:0.1:0.2"
 export TAVILY_API_KEY=...   # lub BRAVE_API_KEY
 ```
 
-`python -m fama doctor` sprawdza konfigurację.
+Klucze można też zapisać w pliku `.env` w katalogu projektu (format
+`KEY=VALUE`; plik jest w `.gitignore` i ładowany automatycznie).
+
+`python -m fama doctor` sprawdza konfigurację **oraz osiągalność endpointu**
+(niektóre sieci — np. sandboxy — blokują ruch do API LLM; doctor to raportuje).
 
 > Tryb **SCRIPTED** (scenariusze demo, replaye, testy) używa deterministycznego
 > test-double zamiast modelu — jest wszędzie wyraźnie oznaczony i nigdy nie

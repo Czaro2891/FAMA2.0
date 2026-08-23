@@ -21,6 +21,7 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -28,6 +29,28 @@ import httpx
 from .core import ModelClass, ProviderKind, clamp, new_id
 
 PRICE_NOTE = "prices are approximate planning estimates, not billing"
+
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Minimal .env loader (KEY=VALUE lines, '#' comments, no overrides)."""
+    try:
+        p = Path(path)
+        if not p.exists():
+            return
+        for line in p.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            v = v.strip().strip('"').strip("'")
+            os.environ.setdefault(k.strip(), v)
+    except Exception:
+        pass
+
+
+_load_dotenv()
 
 
 @dataclass
@@ -73,6 +96,16 @@ CATALOG: list[ModelInfo] = [
 
 DEFAULT_COMPAT_MODELS = [
     "fast:qwen2.5:7b",  # placeholder replaced at runtime by FAMA_MODELS or sensible default
+]
+
+# models served through OpenRouter (openai-compatible API)
+OPENROUTER_MODELS = [
+    ("openai/gpt-4o-mini", _mc("cheap", "fast"), 0.15, 0.60, 5.0, 0.72),
+    ("anthropic/claude-3.5-haiku", _mc("cheap", "fast"), 0.80, 4.00, 6.0, 0.78),
+    ("openai/gpt-4o", _mc("coding"), 2.50, 10.00, 10.0, 0.90),
+    ("anthropic/claude-sonnet-4.5", _mc("coding", "reasoning"), 3.00, 15.00, 13.0, 0.92),
+    ("openai/o4-mini", _mc("reasoning", "coding"), 1.10, 4.40, 20.0, 0.88),
+    ("anthropic/claude-opus-4.1", _mc("adversarial", "reasoning"), 15.00, 75.00, 28.0, 0.95),
 ]
 
 
@@ -159,9 +192,10 @@ class LLMGateway:
             "openai": bool(os.environ.get("OPENAI_API_KEY")),
             "anthropic": bool(os.environ.get("ANTHROPIC_API_KEY")),
             "openai_compatible": bool(os.environ.get("OPENAI_API_KEY") and os.environ.get("OPENAI_BASE_URL")),
+            "openrouter": bool(os.environ.get("OPENROUTER_API_KEY")),
             "scripted": self.allow_scripted,
         }
-        s["any_real"] = s["openai"] or s["anthropic"] or s["openai_compatible"]
+        s["any_real"] = s["openai"] or s["anthropic"] or s["openai_compatible"] or s["openrouter"]
         return s
 
     def _env_models(self) -> list[ModelInfo]:
@@ -210,6 +244,14 @@ class LLMGateway:
                                         ProviderKind.OPENAI_COMPATIBLE,
                                         _mc("fast", "coding"), 0.4, 1.2, 8.0, 0.8,
                                         note="default model of OPENAI_BASE_URL endpoint"))
+        if status["openrouter"]:
+            have = {m.id for m in models}
+            for mid, classes, pin, pout, lat, q in OPENROUTER_MODELS:
+                mid_qualified = f"openrouter/{mid}"
+                if mid_qualified not in have:
+                    models.append(ModelInfo(mid_qualified, mid,
+                                            ProviderKind.OPENAI_COMPATIBLE, classes,
+                                            pin, pout, lat, q, note="via OpenRouter"))
         return models
 
     def available_models(self) -> list[ModelInfo]:
@@ -286,8 +328,12 @@ class LLMGateway:
     async def _call_provider(self, m: ModelInfo, req: LLMRequest) -> tuple[str, int, int]:
         client = self._client_()
         if m.provider in (ProviderKind.OPENAI, ProviderKind.OPENAI_COMPATIBLE):
-            base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-            key = os.environ.get("OPENAI_API_KEY", "")
+            orkey = os.environ.get("OPENROUTER_API_KEY", "")
+            if m.provider == ProviderKind.OPENAI_COMPATIBLE and orkey:
+                base, key = OPENROUTER_BASE, orkey
+            else:
+                base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+                key = os.environ.get("OPENAI_API_KEY", "")
             body: dict = {
                 "model": m.model_id,
                 "messages": [{"role": x.role, "content": x.content} for x in req.messages],

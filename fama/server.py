@@ -72,7 +72,8 @@ async def health():
             "scripted_mode": fama_app.scripted_mode,
             "warning": None if prov["any_real"] else
                        "No real LLM provider configured — live tasks will block honestly. "
-                       "Set OPENAI_API_KEY and/or ANTHROPIC_API_KEY (optionally OPENAI_BASE_URL). "
+                       "Set OPENAI_API_KEY, ANTHROPIC_API_KEY or OPENROUTER_API_KEY "
+                       "(optionally OPENAI_BASE_URL). "
                        "Scenario demos (SCRIPTED) and replays remain available."}
 
 
